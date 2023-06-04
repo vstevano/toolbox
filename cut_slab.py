@@ -1,4 +1,3 @@
-###############################                                                                            #                                                                                                          #  This file is written by Vladan Stevanovic                                                               #                                                                                                          ###############################
 
 from pylada.crystal import supercell, read, neighbors
 import numpy as np
@@ -12,28 +11,27 @@ class CutSlab():
     of a given thickness from a given
     bulk structure for an arbitrary 
     set of Miller indices hkl. There are 
-    also functions to produce terminations 
-    that minimize (a) the number of broken 
-    bonds of surface atoms, (b) surogate surface 
-    energy, and (c) Madelung energy, and to compute 
+    also functions to produce termination 
+    that minimizes the umber of broken 
+    bonds of surface atoms and to compute 
     the dipole moment in the hkl direction
     from the atomic positions and the 
     oxidation states as charges
 
-    Returns a slab from the 3D structure
+    Returns a slab from the 3D structure                                                              
 
-    Takes a structure and makes a slab defined by the Miller indices 
+    Takes a structure and makes a slab defined by the miller indices 
     with nlayers number of layers and vacuum defining the size of the 
-    vacuum thickness. Variable "cutoff" determines the number of loops used 
+    vacuum thickness. Variable cutoff determines the number of loops used 
     to get the direct lattice vectors perpendicular and parallel to 
-    the vector Miller. For high index surfaces use larger cutoff value
-    Warning: (1) cell is always set such that Miller vector is alogn z-axes
+    miller. For high index surfaces use larger cutoff value
+    Warning: (1) cell is always set such that miller is alogn z-axes
              (2) nlayers and vacuum are always along z-axes.
     
     :param bulk:     pylada structure
 
     :param miller:   3x1 float64 array 
-                     Miller indices
+                     Miller indices defining the slab
 
     :param charges:  dict
                      'atom.type:charge' dictionary for 
@@ -42,7 +40,7 @@ class CutSlab():
     :param chem_pot: dict (default all species -1.)
                      chemical potentials of the species
                      needed for the energy minimization
-                     instead of the number of broken bonds
+                     instead of number of broken bonds
 
     :param nlayers:  integer (default 5)
                      Number of layers in the slab
@@ -62,7 +60,7 @@ class CutSlab():
 
     :param depth:    float (default 5. AA)
                      distance in AA from each termination 
-                     plane in z-direction (hkl) within 
+                     plane in z-direction (hkl) withing 
                      which the undercoordinated atoms are 
                      looked for. For thin slabs (small nlayers 
                      of slanted a3 vector) depth is reset so it 
@@ -229,9 +227,9 @@ class CutSlab():
             # for the equivalent atom
             max_dist=max([bulk_ng[-1] for bulk_ng in self.bulk_nghs[eq_site]])
 
-            # checking the distances and adding 0.1 AA just so to
+            # checking the distances and adding 0.01 AA just so to
             # avoid problems with numerical innacurracies
-            if ng[-1]<=max_dist + 0.1:
+            if ng[-1]<=max_dist + 0.01:
                 nghs.append(ng)
 
         return nghs
@@ -400,9 +398,9 @@ class CutSlab():
                                     bulk_first_shell[eq_site][1]]\
                                    )
 
-
-        assert all([x>0 for x in np.array(under_coord)[:,1]]),\
-            "hkl=%s Something is off, coordination in the slab larger than in the bulk!!!" %(self.miller)
+        if len(under_coord)>0:
+            assert all([x>0 for x in np.array(under_coord)[:,1]]),\
+                "hkl=%s Something is off, coordination in the slab larger than in the bulk!!!" %(self.miller)
 
         # returns the list of undercoordinated atoms 
         # atom index in the slab, difference in coordination relative to the bulk, coordination, coordination in the bulk
@@ -456,9 +454,9 @@ class CutSlab():
                                     bulk_first_shell[eq_site][1]]\
                                    )
 
-
-        assert all([x>0 for x in np.array(under_coord)[:,1]]),\
-            "hkl=%s Something is off, coordination in the slab larger than in the bulk!!!" %(self.miller)
+        if len(under_coord)>0:
+            assert all([x>0 for x in np.array(under_coord)[:,1]]),\
+                "hkl=%s Something is off, coordination in the slab larger than in the bulk!!!" %(self.miller)
 
         # returns the list of undercoordinated atoms 
         # atom index in the slab, difference in coordination relative to the bulk, coordination, coordination in the bulk
@@ -473,8 +471,11 @@ class CutSlab():
 
         uc=self.get_under_coord(slab=slab)
 
+        if len(uc)>0:
         #           Total                       Per undercoord atom
-        return np.sum(np.array(uc)[:,1]), np.sum(np.array(uc)[:,1])/len(uc)
+            return np.sum(np.array(uc)[:,1]), np.sum(np.array(uc)[:,1])/len(uc)
+        elif len(uc)==0:
+            return 0, 0.
     ##########
 
     def get_tot_top_broken_bonds(self, slab=None):
@@ -484,8 +485,12 @@ class CutSlab():
 
         uc=self.get_top_under_coord(slab=slab)
 
+        if len(uc)>0:
         #           Total                       Per undercoord atom
-        return np.sum(np.array(uc)[:,1]), np.sum(np.array(uc)[:,1])/len(uc)
+            return np.sum(np.array(uc)[:,1]), np.sum(np.array(uc)[:,1])/len(uc)
+        elif len(uc)==0:
+            return 0, 0.
+
     ##########
     
     def get_broken_bonds_per_area(self, slab=None):
@@ -496,7 +501,10 @@ class CutSlab():
         uc=self.get_under_coord(slab=slab)
         area=np.linalg.norm(np.cross(slab.cell[:,0],slab.cell[:,1]))
 
-        return np.sum(np.array(uc)[:,1])/2/area
+        if len(uc)>0:        
+            return np.sum(np.array(uc)[:,1])/2/area
+        elif len(uc)==0:
+            return 0.
     ##########
 
     def get_top_broken_bonds_per_area(self, slab=None):
@@ -507,7 +515,10 @@ class CutSlab():
         uc=self.get_top_under_coord(slab=slab)
         area=np.linalg.norm(np.cross(slab.cell[:,0],slab.cell[:,1]))
 
-        return np.sum(np.array(uc)[:,1])/2/area
+        if len(uc)>0:
+            return np.sum(np.array(uc)[:,1])/2/area
+        elif len(uc)==0:
+            return 0.
     ##########
     
     def get_bond_energy(self, slab=None):
@@ -518,14 +529,14 @@ class CutSlab():
         """
 
         und_coor=self.get_under_coord(slab=slab)
-        
+
         bond_en=[]
         for uc in und_coor:
             atom_index=uc[0]
             
             eq_site=slab[atom_index].site
             b_e=np.round(-uc[1]*self.bond_energies[eq_site],8)
-
+            
             bond_en.append([uc[0],b_e])
             
         return bond_en
@@ -633,7 +644,7 @@ class CutSlab():
         WARNING!!!
         This function uses the pylada.crystal.supercell function.
         Once applied the atom.site attributes wil no longer
-        be derived from the bulk sites. Do htis at hte very end
+        be derived from the bulk sites. Do this at hte very end
         not before.
         """
 
@@ -662,6 +673,9 @@ class CutSlab():
         rc=self.z_center(slab=pom)
         # Get the undercoordinated
         under_coord=self.get_top_under_coord(slab=pom)
+
+        if len(under_coord)==0:
+            return pom
 
         # Now, we want to select the most undercoordinated of the top undercoor to move.
         # This is done by selecting those whose undercoordination relative to
@@ -706,6 +720,12 @@ class CutSlab():
         zcenter=np.sum(zcoord)/len(slab)
         thickness=max(zcoord)-min(zcoord)
         no_broken=self.get_tot_broken_bonds(slab=slab)
+
+        if no_broken[0]==0:
+            if verbose:
+                print("No of broken bonds = 0, nothing to do!")
+            return slab
+        
         dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
         
         data = [[slab,zcenter,no_broken[0],no_broken[1],no_broken[0]/2/area,dipole]]
@@ -731,6 +751,14 @@ class CutSlab():
             zcoord=[atom.pos[2] for atom in slab]
             zcenter=np.sum(zcoord)/len(slab)
             no_broken=self.get_tot_broken_bonds(slab=slab)
+
+            if no_broken[0]==0:
+                if verbose:
+                    print("No of broken bonds = 0, stopping minimization!")
+                dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
+                data.append([slab,zcenter,0,0.,0.,dipole])
+                break
+
             dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
             
             data.append([slab,zcenter,no_broken[0],no_broken[1],no_broken[0]/2/area,dipole])
@@ -795,6 +823,12 @@ class CutSlab():
         zcenter=np.sum(zcoord)/len(slab)
         thickness=max(zcoord)-min(zcoord)
         top_broken=self.get_top_under_coord(slab=slab)
+
+        if len(top_broken)==0:
+            if verbose:
+                print("No of top broken bonds = 0, nothing to do!")
+            return slab
+
         no_broken=np.sum(np.array(top_broken)[:,1])
         no_broken_per_atom=np.sum(np.array(top_broken)[:,1])/len(top_broken)
         dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
@@ -828,6 +862,26 @@ class CutSlab():
             zcoord=[atom.pos[2] for atom in slab]
             zcenter=np.sum(zcoord)/len(slab)
             top_broken=self.get_top_under_coord(slab=slab)
+
+            if len(top_broken)==0:
+                if verbose:
+                    print("No of top broken bonds = 0, stopping minimization!")
+
+                no_broken=0.
+                no_broken_per_atom=0.
+                dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
+                
+                data.append([slab,\
+                             zcenter,\
+                             top_broken,\
+                             no_broken,\
+                             no_broken_per_atom,\
+                             no_broken/area,\
+                             dipole])
+                                    
+                break
+
+            
             no_broken=np.sum(np.array(top_broken)[:,1])
             no_broken_per_atom=np.sum(np.array(top_broken)[:,1])/len(top_broken)
             dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
@@ -884,6 +938,9 @@ class CutSlab():
 
         # Get the bond energies of top atoms
         top_bond_energies=self.get_top_bond_energy(slab=pom)
+
+        if len(top_bond_energies)==0:
+            return pom
         
         # Now, we want to select the highest bond energy of the top atoms to move.
         max_bond_energy=max(np.array(top_bond_energies)[:,1])
@@ -925,6 +982,12 @@ class CutSlab():
         zcenter=np.sum(zcoord)/len(slab)
         thickness=max(zcoord)-min(zcoord)
         bond_energy=self.get_bond_energy(slab=slab)
+
+        if len(bond_energy)==0:
+            if verbose:
+                print("Bond energy = 0, nothing to do!")
+            return slab
+        
         tot_bond_energy=np.round(np.sum(np.array(bond_energy)[:,1]),6)
         bond_energy_per_atom=np.round(tot_bond_energy/len(bond_energy),6)
         dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
@@ -952,6 +1015,20 @@ class CutSlab():
             zcoord=[atom.pos[2] for atom in slab]
             zcenter=np.sum(zcoord)/len(slab)
             bond_energy=self.get_bond_energy(slab=slab)
+
+            if len(bond_energy)==0:
+                if verbose:
+                    print("Bond energy = 0, stopping minimization!")
+
+                tot_bond_energy=0.
+                bond_energy_per_atom=0.
+                dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
+                
+                data.append([slab,zcenter,tot_bond_energy,bond_energy_per_atom,tot_bond_energy/area,dipole])
+                    
+                break
+
+
             tot_bond_energy=np.round(np.sum(np.array(bond_energy)[:,1]),6)
             bond_energy_per_atom=np.round(tot_bond_energy/len(bond_energy),6)
             dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
@@ -1018,6 +1095,12 @@ class CutSlab():
         zcenter=np.sum(zcoord)/len(slab)
         thickness=max(zcoord)-min(zcoord)
         top_bond_energy=self.get_top_bond_energy(slab=slab)
+
+        if len(top_bond_energy)==0:
+            if verbose:
+                print("Top bond energy = 0, nothing to do!")
+            return slab
+        
         tot_top_bond_energy=np.round(np.sum(np.array(top_bond_energy)[:,1]),6)
         top_bond_energy_per_atom=np.round(tot_top_bond_energy/len(top_bond_energy),6)
         dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
@@ -1051,6 +1134,25 @@ class CutSlab():
             zcoord=[atom.pos[2] for atom in slab]
             zcenter=np.sum(zcoord)/len(slab)
             top_bond_energy=self.get_top_bond_energy(slab=slab)
+
+            if len(bond_energy)==0:
+                if verbose:
+                    print("Top bond energy = 0, stopping minimization!")
+
+                tot_top_bond_energy=0.
+                top_bond_energy_per_atom=0.
+                dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
+                
+                data.append([slab,\
+                             zcenter,\
+                             to_bond_energy,\
+                             tot_top_bond_energy,\
+                             top_bond_energy_per_atom,\
+                             tot_top_bond_energy/area,\
+                             dipole])
+                
+                break
+            
             tot_top_bond_energy=np.round(np.sum(np.array(top_bond_energy)[:,1]),6)
             top_bond_energy_per_atom=np.round(tot_top_bond_energy/len(top_bond_energy),6)
             dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
@@ -1099,7 +1201,7 @@ class CutSlab():
         """
         A function to construct terminations 
         that minimize the Madelung energy. 
-        The idea is to move_top2bottom a numer of 
+        The idea is to move_top2bottom a number of 
         times and then pick the slab with the minimal
         Madelung energy terminations. This might be an overkill
         but insures that the global minimum is found.
