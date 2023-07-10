@@ -228,7 +228,6 @@ class Wulff():
 
         assert hkl!=None, "Something is Off, cannot find hkl"
 
-
         
         # hkl done now the area
         
@@ -305,7 +304,8 @@ class Wulff():
     # Plot the Wullf shape
     def plot_wullf(self, reg=None, faces=None, figsize=[8,8],\
                    plot_corners=False, color='k', face_color=None,\
-                   figname=None, view_angle=[45, 22.5],alpha=0.85):
+                   figname=None, view_angle=[45, 22.5], alpha=0.85,\
+                   draw_xyz=True):
         
         import mpl_toolkits.mplot3d as a3
         import matplotlib.pyplot as plt
@@ -327,6 +327,12 @@ class Wulff():
 
         ## Draw the faces and edges of the IBZ
         for face in faces:
+
+            ridges=deepcopy(face)
+            ridges.append(ridges[0])
+            ridges=np.array(ridges)
+            ax.plot3D(ridges[:, 0], ridges[:, 1], ridges[:, 2], color=color, lw=3.)
+
             if face_color==None:
                 ff = a3.art3d.Poly3DCollection([face],color=np.random.choice(default_colors), alpha=alpha)
             else:
@@ -334,32 +340,30 @@ class Wulff():
                 
             ax.add_collection3d(ff)
             
-            ridges=deepcopy(face)
-            ridges.append(ridges[0])
-            ridges=np.array(ridges)
-            ax.plot3D(ridges[:, 0], ridges[:, 1], ridges[:, 2], color=color)
             
+
         ##  Draw xyz 
-
-        # axis limits
-        minmax=[min(reg.flatten()),max(reg.flatten())]
-
-        ax.plot3D([0.,minmax[1]], [0.,0.], [0.,0.], color='r')
-        ax.plot3D([0.,0.], [0.,minmax[1]], [0.,0.], color='g')
-        ax.plot3D([0.,0.], [0.,0.], [0.,minmax[1]], color='b')
+        if draw_xyz:
+            # axis limits
+            minmax=[min(reg.flatten()),max(reg.flatten())]
+            
+            ax.plot3D([0.,minmax[1]], [0.,0.], [0.,0.], color='r')
+            ax.plot3D([0.,0.], [0.,minmax[1]], [0.,0.], color='g')
+            ax.plot3D([0.,0.], [0.,0.], [0.,minmax[1]], color='b')
         
+            # Label each axis
+            #ax.set_xlabel('x')
+            #ax.set_ylabel('y')
+            #ax.set_zlabel('z')
+            
+            # Set axis limits
+            ax.set_xlim(minmax)
+            ax.set_ylim(minmax) 
+            ax.set_zlim(minmax) 
+            
+            
         ## Some figure plotting customization
         ax.set_axis_off()
-        
-        # Label each axis
-        #ax.set_xlabel('x')
-        #ax.set_ylabel('y')
-        #ax.set_zlabel('z')
-        
-        # Set axis limits
-        ax.set_xlim(minmax)
-        ax.set_ylim(minmax) 
-        ax.set_zlim(minmax) 
 
         # Show rotating or savefig
         if figname==None:

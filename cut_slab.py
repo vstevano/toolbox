@@ -724,6 +724,10 @@ class CutSlab():
         if no_broken[0]==0:
             if verbose:
                 print("No of broken bonds = 0, nothing to do!")
+            self.min_no_broken=0.
+            self.min_no_broken_per_area=0.
+            self.min_no_broken_per_atom=0.
+            self.min_dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness                
             return slab
         
         dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
@@ -827,6 +831,10 @@ class CutSlab():
         if len(top_broken)==0:
             if verbose:
                 print("No of top broken bonds = 0, nothing to do!")
+            self.min_no_broken=0.
+            self.min_no_broken_per_area=0.
+            self.min_no_broken_per_atom=0.
+            self.min_dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
             return slab
 
         no_broken=np.sum(np.array(top_broken)[:,1])
@@ -986,6 +994,10 @@ class CutSlab():
         if len(bond_energy)==0:
             if verbose:
                 print("Bond energy = 0, nothing to do!")
+            self.min_bond_energy=0.
+            self.min_bond_energy_per_area=0.
+            self.min_bond_energy_per_atom=0.
+            self.min_dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
             return slab
         
         tot_bond_energy=np.round(np.sum(np.array(bond_energy)[:,1]),6)
@@ -1099,6 +1111,10 @@ class CutSlab():
         if len(top_bond_energy)==0:
             if verbose:
                 print("Top bond energy = 0, nothing to do!")
+            self.min_bond_energy=0.
+            self.min_bond_energy_per_area=0.
+            self.min_bond_energy_per_atom=0.
+            self.min_dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
             return slab
         
         tot_top_bond_energy=np.round(np.sum(np.array(top_bond_energy)[:,1]),6)
