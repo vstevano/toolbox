@@ -41,6 +41,6 @@ Function to evaluate solid angle spanned by a polygon as viewed from a center po
 
 9. mean_value_point.py
 
-A code to compute the Mean Value (Baldereschi) Point of a given structure in the first Brillouin zone. For a detailed explanation of the fundamentals of the mean valu point and how to compute it please check: A. Baldcreschi, 'Mean-Value Point in the Brillouin Zone', Phys. Rev. B 7, 5212 (1973) DOI: https://doi.org/10.1103/PhysRevB.7.5212 .
+A code to compute the Mean Value (Baldereschi's) Point of a given structure in the first Brillouin zone. For a detailed explanation of the fundamentals of the mean value point and how to compute it please check: A. Baldcreschi, 'Mean-Value Point in the Brillouin Zone', Phys. Rev. B 7, 5212 (1973) DOI: https://doi.org/10.1103/PhysRevB.7.5212 .
 This code follows directly the reasonong from Baldereschi, with the caveat that the system of equations that needs to be solved to obtain the mean value point is solved numerically on the grid of k-points.
 
