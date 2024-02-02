@@ -36,7 +36,7 @@ class Sq():
 
     s=read.poscar('POSCAR')
     sq=Sq(strc=s, dq=0.01, q_max=20.0, x_ray=True, neutrons=False, ones=False)
-    data=sq.__call__()
+    data=sq.strc_func_tot()
     """
     
     def __init__(self, strc=None, dq=0.01, q_max=25., x_ray=False, neutrons=False, ones=False):
