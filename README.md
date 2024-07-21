@@ -27,22 +27,18 @@ Functions to translate pylada structure object into the spglib one and back
 
 A class to compute the powder diffraction pattern for a given structure. Originally written by Shuye Ping Ong for pymatgen and adapted for pylada by P. Graf and later V. Stevanovic (see https://materialsproject.org/about/terms)
 
-6. pdf.py
-
-Function that computes partial pair distribution functions (atom type resovled) between 0. and cutoff_r with the grid on the distance axis defined by dr. Returns a dictionary with keys labeling the types of atoms for which g(r) is calculated (e.g. 'Si-Si','Si-O', etc.) and the values are corresponding g(r).
-
-7. fancy_firstshell.py
+6. fancy_firstshell.py
 
 A function that uses the original pylada neighbors function to compute the first shell coordination and neighbors of atoms. It still uses the original neighbors function, just makes sure the output fullfils additional criteria.
 
-8. solid_angle.py
+7. solid_angle.py
 
 Function to evaluate solid angle spanned by a polygon as viewed from a center point outside of it. This is done by splitting the pyramid into tetrahedra and then summing all solid angles of individual tetrahedra.
 
-9. mean_value_point.py
+8. mean_value_point.py
 
 A code to compute the Mean Value (Baldereschi's) Point of a given structure in the first Brillouin zone. For a detailed explanation of the fundamentals of the mean value point and how to compute it please check: A. Baldcreschi, 'Mean-Value Point in the Brillouin Zone', Phys. Rev. B 7, 5212 (1973) DOI: https://doi.org/10.1103/PhysRevB.7.5212 . This code follows directly the reasonong from Baldereschi, with the caveat that the system of equations that needs to be solved to obtain the mean value point is solved numerically on the grid of k-points.
 
-10. structure_function.py
+9. structure_functions.py
 
-A code to compute Q-dependent structure function (structure factor). Simulation of both X-ray and neutron diffraction experiments is implemented. The atomic_scattering_params.py contains various atomic scattering parameters needed for calculations of the structure function.
+A code to compute Q-dependent structure function (structure factor) and the partial pair distribution functions. Simulation of both X-ray and neutron diffraction experiments is implemented. The atomic_scattering_params.py contains various atomic scattering parameters needed for calculations of the structure factor.
