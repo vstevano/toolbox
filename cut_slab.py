@@ -42,8 +42,8 @@ class CutSlab():
                      needed for the energy minimization
                      instead of number of broken bonds
 
-    :param nlayers:  integer (default 5)
-                     Number of layers in the slab
+    :param min_thickness:  float (default 10.)
+                           Minimal thickness of the slab in AA
 
     :param vacuum:   real (default 15.)
                      Vacuum thicness in angstroms
@@ -79,12 +79,12 @@ class CutSlab():
     bulk=read.poscar('POSCAR')
     miller=np.array([-2., 0., 1.])
     charges={'Ga':3., 'O':-2}
-    nlayers=3
+    min_thickness=20.
     vacuum=15.
 
-    cs=CutSlab(bulk=bulk, miller=miller, charges=charges, nlayers=nlayers, vacuum=vacuum)
-    cs.make_slab()
-    slab=cs.slab
+    cs=CutSlab(bulk=bulk, miller=miller, charges=charges, min_thickness=min_thickness, vacuum=vacuum)
+    slab=cs.make_slab()
+    slab=cs.minimize_broken_bonds(slab=slab,verbose=True,maxiter=25)
     """
     
     ##########
@@ -93,7 +93,8 @@ class CutSlab():
                  miller=None,\
                  charges=None,\
                  chem_pot=None,\
-                 nlayers=5,\
+                 #nlayers=5,\
+                 min_thickness=10.,\
                  vacuum=15.,\
                  cutoff=5,\
                  tol=0.2,\
@@ -104,10 +105,11 @@ class CutSlab():
         self.bulk=bulk
         self.miller=miller
         self.charges=charges
-        self.nlayers=nlayers
+        #self.nlayers=nlayers
         self.vacuum=vacuum
         self.cutoff=cutoff
         self.ewald_cutoff=ewald_cutoff
+        self.min_thickness=min_thickness
         
         # Setting the tolerance
         if type(tol)==float: 
@@ -283,24 +285,37 @@ class CutSlab():
 
         for nn in product(np.linspace(self.cutoff,-self.cutoff, 2*self.cutoff+1),repeat=3):
             pom = np.dot(np.array(nn),self.direct_cell)
-            if np.linalg.norm(pom)-np.dot(e3,pom)<1e-8 and np.linalg.norm(pom)>1e-3:
+            if (np.linalg.norm(pom)-np.dot(e3,pom))<1e-8 and np.linalg.norm(pom)>1e-3:
                 parallel.append(pom)
 
         # if there are no lattice vectors parallel to miller 
         if len(parallel)==0:
             for nn in product(np.linspace(self.cutoff,-self.cutoff, 2*self.cutoff+1),repeat=3):
                 pom = np.dot(np.array(nn),self.direct_cell)
-                if np.dot(e3,pom)>1e-3:
+                if np.linalg.norm(pom)>1e-3 and np.dot(e3,pom)>1e-3:
                     parallel.append(pom)
 
-        # select only those that have nonzero orthogonal component
+        # For good behavior select only those that have nonzero orthogonal component
         parallel = [x for x in parallel if np.linalg.norm(x - np.dot(e1,x)*e1 - np.dot(e2,x)*e2)>1e-3 ]
+        
+        assert len(parallel)!=0,\
+                "hkl=%s: Increase cutoff, found no lattice vectors parallel to (hkl)" %(self.miller)
+        
+        # Choosing a3 among those that have largest projection onto e3
+        e3_proj = [np.dot(e3,pom)/np.linalg.norm(pom) for pom in parallel]
+        max_e3_proj = max(e3_proj)
+        parallel = [pom for ii,pom in enumerate(parallel) if np.abs(e3_proj[ii]-max_e3_proj)<0.1]
         norm_parallel = [np.linalg.norm(x) for x in parallel]
 
         assert len(norm_parallel)!=0,\
-            "hkl=%s: Increase cutoff, found no lattice vectors parallel to (hkl)" %(self.miller)
+                 "hkl=%s: Increase cutoff, found no lattice vectors parallel to (hkl)" %(self.miller)
 
+
+        # Now the shortest or of those
         a3 = parallel[norm_parallel.index(min(norm_parallel))]
+
+        # How many time needs to be repeated to get above the min_thickness
+        self.nlayers = int(np.ceil(self.min_thickness/np.dot(e3,a3)))
 
         # making a structure in the new unit cell - defined by the a1,a2,nlayers*a3 
         new_direct_cell = np.array([a1,a2,self.nlayers*a3])
@@ -308,7 +323,7 @@ class CutSlab():
         # make sure determinant is positive
         if np.linalg.det(new_direct_cell)<0.: new_direct_cell = array([-a1,a2,a3])
 
-        assert np.linalg.det(new_direct_cell)>=np.linalg.det(self.direct_cell),\
+        assert np.linalg.det(new_direct_cell)>=0.9*np.linalg.det(self.direct_cell),\
             "hkl=%s Something is wrong your volume is equal to zero" %(self.miller)
 
         structure = supercell(self.bulk,np.transpose(new_direct_cell))
@@ -623,15 +638,19 @@ class CutSlab():
         middle of the cell (along z)
         """
 
-        max_z = max([atom.pos[2] for atom in slab])
-        min_z = min([atom.pos[2] for atom in slab])
+        from copy import deepcopy
+
+        pom=deepcopy(slab)
+        
+        max_z = max([atom.pos[2] for atom in pom])
+        min_z = min([atom.pos[2] for atom in pom])
         center_atoms = 0.5*(max_z+min_z)
-        center_cell  = 0.5*slab.cell[2][2]
+        center_cell  = 0.5*pom.cell[2][2]
 
-        for ii in range(len(slab)):
-            slab[ii].pos = slab[ii].pos + np.array([0.,0.,center_cell-center_atoms])
+        for ii in range(len(pom)):
+            pom[ii].pos = pom[ii].pos + np.array([0.,0.,center_cell-center_atoms])
 
-        return
+        return pom
     ##########
 
     def straighten_cell(self, slab=None):
@@ -680,18 +699,22 @@ class CutSlab():
         # Now, we want to select the most undercoordinated of the top undercoor to move.
         # This is done by selecting those whose undercoordination relative to
         # their coordination in the bulk is the largest. The criterion is:
-        top_lowest_coord=max([uc[1]/uc[3] for uc in under_coord])
-
+        # vladan top_lowest_coord=max([uc[1]/uc[3] for uc in under_coord])
+        top_lowest_coord=max([uc[1] for uc in under_coord])
+        max_z_coord=max([pom[uc[0]].pos[2] for uc in under_coord if uc[1]==top_lowest_coord])
+        
         # Now select and move
         if len(under_coord)>0:
             for uc in under_coord:
-                if uc[1]/uc[3]==top_lowest_coord:
+                #vladan if uc[1]/uc[3]==top_lowest_coord:
+                #if uc[1]==top_lowest_coord:
+                if uc[1]==top_lowest_coord and np.abs(max_z_coord-pom[uc[0]].pos[2])<0.1:
                     self.shift_to_bottom(slab=pom, atom_index=uc[0])
                     
         return pom
     ##########
 
-    def minimize_broken_bonds(self, slab=None, verbose=True, maxiter=10):
+    def minimize_broken_bonds(self, slab=None, verbose=True, maxiter=25):
         """
         A function to construct terminations 
         that minimize the number of broken bonds. 
@@ -710,7 +733,7 @@ class CutSlab():
         :param verbose: logical (to write messages or not)
                         does not work well in python.multiprocessing
 
-        :param maxiter: int (default=10)
+        :param maxiter: int (default=25)
                         hard stop after maxiter iterations
         """
         
@@ -726,9 +749,9 @@ class CutSlab():
                 print("No of broken bonds = 0, nothing to do!")
             self.min_no_broken=0.
             self.min_no_broken_per_area=0.
-            self.min_no_broken_per_atom=0.
-            self.min_dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness                
-            return slab
+            self.min_no_broken_per_atom=[0.]
+            self.min_dipoles=[float(round(self.get_dipole_moment(slab=slab),4))]#/in_plane_area/thickness                
+            return [slab]
         
         dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
         
@@ -744,7 +767,12 @@ class CutSlab():
         # Now iterate until the entire layer is shifted to the bottom
         Iter=0
 
-        while (np.abs(data[-1][1]-data[0][1])<=thickness/self.nlayers) and (Iter<maxiter):
+        if self.nlayers==1:
+            nnll=1
+        else:
+            nnll=self.nlayers-1
+
+        while (np.abs(data[-1][1]-data[0][1])<=thickness/nnll) and (Iter<maxiter):
 
             Iter=Iter+1
 
@@ -771,34 +799,34 @@ class CutSlab():
                 print("Iter {:2d}: no_broken={:3d},  dipole={: 10.3f}, shift={: 8.3f}".\
                       format(Iter,no_broken[0],dipole,data[-1][1]-data[-2][1]))
 
-        no_broken_all=[dd[2] for dd in data]
+        # Output after iterating
+        no_broken_all=[float(np.round(dd[2],4)) for dd in data]
         min_no_broken_all=min(no_broken_all)
-        
-        if no_broken_all.count(min_no_broken_all)==1:
-            min_index=no_broken_all.index(min_no_broken_all)
-            out_slab=data[min_index][0]
-            self.min_no_broken=data[min_index][2]
-            self.min_no_broken_per_atom=data[min_index][3]
-            self.min_no_broken_per_area=data[min_index][4]
-            self.min_dipole=data[min_index][5]
-            
-        elif no_broken_all.count(min_no_broken_all)>1:
-            out_data=[dd for dd in data if dd[2]==min_no_broken_all]
-            dipoles=[np.abs(dd[-1]) for dd in out_data]
-            min_dipole=min(dipoles)
-            min_index=dipoles.index(min_dipole)
-            out_slab=out_data[min_index][0]
-            self.min_no_broken=out_data[min_index][2]
-            self.min_no_broken_per_atom=out_data[min_index][3]
-            self.min_no_broken_per_area=out_data[min_index][4]
-            self.min_dipole=out_data[min_index][5]
 
-        self.re_center(slab=out_slab)
+        min_indices=[]
+        min_no_broken_per_atom=[]
+        min_dipoles=[]
+
+        for ii,xx in enumerate(no_broken_all):
+            if not xx==min_no_broken_all:
+                continue
+            if (not float(round(data[ii][3],4)) in min_no_broken_per_atom) \
+            or (not float(round(data[ii][5],4)) in min_dipoles):
+                min_indices.append(ii)
+                min_no_broken_per_atom.append(float(round(data[ii][3],4)))
+                min_dipoles.append(float(round(data[ii][5],4)))
         
-        return out_slab
+        out_slabs=[self.re_center(slab=data[mi][0]) for mi in min_indices]
+
+        self.min_no_broken=int(min_no_broken_all)
+        self.min_no_broken_per_atom=min_no_broken_per_atom
+        self.min_no_broken_per_area=float(round(min_no_broken_all/2/area,4)) 
+        self.min_dipoles=min_dipoles
+        
+        return out_slabs
     ##########
 
-    def minimize_top_broken_bonds(self, slab=None, verbose=True, maxiter=10):
+    def minimize_top_broken_bonds(self, slab=None, verbose=True, maxiter=25):
         """
         A function to construct terminations 
         that minimize the number of broken bonds. 
@@ -817,7 +845,7 @@ class CutSlab():
         :param verbose: logical (to write messages or not)
                         does not work well in python.multiprocessing
 
-        :param maxiter: int (default=10)
+        :param maxiter: int (default=25)
                         hard stop after maxiter iterations
         """
         
@@ -833,9 +861,9 @@ class CutSlab():
                 print("No of top broken bonds = 0, nothing to do!")
             self.min_no_broken=0.
             self.min_no_broken_per_area=0.
-            self.min_no_broken_per_atom=0.
-            self.min_dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
-            return slab
+            self.min_no_broken_per_atom=[0.]
+            self.min_dipole=[float(round(self.get_dipole_moment(slab=slab),4))]#/in_plane_area/thickness
+            return [slab]
 
         no_broken=np.sum(np.array(top_broken)[:,1])
         no_broken_per_atom=np.sum(np.array(top_broken)[:,1])/len(top_broken)
@@ -859,7 +887,12 @@ class CutSlab():
         # Now iterate until the entire layer is shifted to the bottom
         Iter=0
 
-        while (np.abs(data[-1][1]-data[0][1])<=thickness/self.nlayers) and (Iter<maxiter):
+        if self.nlayers==1:
+            nnll=1
+        else:
+            nnll=self.nlayers-1
+
+        while (np.abs(data[-1][1]-data[0][1])<=thickness/nnll) and (Iter<maxiter):
 
             Iter=Iter+1
 
@@ -906,31 +939,33 @@ class CutSlab():
                 print("Iter {:2d}: no_broken={:3d},  dipole={: 10.3f}, shift={: 8.3f}".\
                       format(Iter,no_broken,dipole,data[-1][1]-data[-2][1]))
 
+        
+        # Output after iterating
         no_broken_all=[dd[3] for dd in data]
         min_no_broken_all=min(no_broken_all)
-        
-        if no_broken_all.count(min_no_broken_all)==1:
-            min_index=no_broken_all.index(min_no_broken_all)
-            out_slab=data[min_index][0]
-            self.min_no_broken=data[min_index][3]
-            self.min_no_broken_per_atom=data[min_index][4]
-            self.min_no_broken_per_area=data[min_index][5]
-            self.min_dipole=data[min_index][6]
-            
-        elif no_broken_all.count(min_no_broken_all)>1:
-            out_data=[dd for dd in data if dd[3]==min_no_broken_all]
-            biggest_under_coord=[max(np.array(dd[2])[:,1]) for dd in out_data]
-            min_buc=min(biggest_under_coord)
-            min_index=biggest_under_coord.index(min_buc)
-            out_slab=out_data[min_index][0]
-            self.min_no_broken=out_data[min_index][3]
-            self.min_no_broken_per_atom=out_data[min_index][4]
-            self.min_no_broken_per_area=out_data[min_index][5]
-            self.min_dipole=out_data[min_index][6]
 
-        self.re_center(slab=out_slab)
-        
-        return out_slab
+        #min_indices=[ii for ii,xx in enumerate(no_broken_all) if xx==min_no_broken_all]
+        min_indices=[]
+        min_no_broken_per_atom=[]
+        min_dipoles=[]
+
+        for ii,xx in enumerate(no_broken_all):
+            if not xx==min_no_broken_all:
+                continue
+            if (not float(round(data[ii][4],4)) in min_no_broken_per_atom) or \
+                    (not float(round(data[ii][6],4)) in min_dipoles):
+                min_indices.append(ii)
+                min_no_broken_per_atom.append(float(round(data[ii][4],4)))
+                min_dipoles.append(float(round(data[ii][6],4)))
+
+        out_slabs=[self.re_center(slab=data[mi][0]) for mi in min_indices]
+
+        self.min_no_broken=int(min_no_broken_all)
+        self.min_no_broken_per_atom=min_no_broken_per_atom
+        self.min_no_broken_per_area=float(round(min_no_broken_all/area,4))
+        self.min_dipoles=min_dipoles
+
+        return out_slabs
     ##########
 
     def move_top2bottom_energy(self, slab=None):
@@ -952,16 +987,18 @@ class CutSlab():
         
         # Now, we want to select the highest bond energy of the top atoms to move.
         max_bond_energy=max(np.array(top_bond_energies)[:,1])
-
+        max_z_coord=max([pom[tbe[0]].pos[2] for tbe in top_bond_energies if tbe[1]==max_bond_energy])
+        
         # Now select and move
         for tbe in top_bond_energies:
-            if tbe[1]==max_bond_energy:
+            #if tbe[1]==max_bond_energy:
+            if tbe[1]==max_bond_energy and np.abs(max_z_coord-pom[tbe[0]].pos[2])<0.1:
                 self.shift_to_bottom(slab=pom, atom_index=tbe[0])
                     
         return pom
     ##########
     
-    def minimize_bond_energy(self, slab=None, verbose=True, maxiter=10):
+    def minimize_bond_energy(self, slab=None, verbose=True, maxiter=25):
         """
         A function to construct terminations 
         that minimize the bond energy. 
@@ -980,7 +1017,7 @@ class CutSlab():
         :param verbose: logical (to write messages or not)
                         does not work well in python.multiprocessing
 
-        :param maxiter: int (default=10)
+        :param maxiter: int (default=25)
                         hard stop after maxiter iterations
         """
         
@@ -996,15 +1033,15 @@ class CutSlab():
                 print("Bond energy = 0, nothing to do!")
             self.min_bond_energy=0.
             self.min_bond_energy_per_area=0.
-            self.min_bond_energy_per_atom=0.
-            self.min_dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
-            return slab
+            self.min_bond_energy_per_atom=[0.]
+            self.min_dipole=[float(round(self.get_dipole_moment(slab=slab),4))]#/in_plane_area/thickness
+            return [slab]
         
         tot_bond_energy=np.round(np.sum(np.array(bond_energy)[:,1]),6)
         bond_energy_per_atom=np.round(tot_bond_energy/len(bond_energy),6)
         dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
         
-        data = [[slab,zcenter,tot_bond_energy,bond_energy_per_atom,tot_bond_energy/area,dipole]]
+        data = [[slab,zcenter,tot_bond_energy,bond_energy_per_atom,tot_bond_energy/2./area,dipole]]
         
         if verbose:
             print("Start: bond_energy={: 10.3f},  dipole={: 10.3f}".format(tot_bond_energy,dipole))
@@ -1016,7 +1053,12 @@ class CutSlab():
         # Now iterate until the entire layer is shifted to the bottom
         Iter=0
 
-        while (np.abs(data[-1][1]-data[0][1])<=thickness/self.nlayers) and (Iter<maxiter):
+        if self.nlayers==1:
+            nnll=1
+        else:
+            nnll=self.nlayers-1
+
+        while (np.abs(data[-1][1]-data[0][1])<=thickness/nnll) and (Iter<maxiter):
 
             Iter=Iter+1
 
@@ -1036,7 +1078,7 @@ class CutSlab():
                 bond_energy_per_atom=0.
                 dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
                 
-                data.append([slab,zcenter,tot_bond_energy,bond_energy_per_atom,tot_bond_energy/area,dipole])
+                data.append([slab,zcenter,tot_bond_energy,bond_energy_per_atom,tot_bond_energy/2./area,dipole])
                     
                 break
 
@@ -1045,44 +1087,48 @@ class CutSlab():
             bond_energy_per_atom=np.round(tot_bond_energy/len(bond_energy),6)
             dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
         
-            data.append([slab,zcenter,tot_bond_energy,bond_energy_per_atom,tot_bond_energy/area,dipole])
+            data.append([slab,zcenter,tot_bond_energy,bond_energy_per_atom,tot_bond_energy/2./area,dipole])
 
             if verbose:
                 print("Iter {:2d}: bond_energy={: 10.3f},  dipole={: 10.3f}, shift={: 8.3f}".\
                       format(Iter,tot_bond_energy,dipole,data[-1][1]-data[-2][1]))
 
+        
+        # Output after iterating
         bond_energy_all=[dd[2] for dd in data]
         min_bond_energy_all=min(bond_energy_all)
         
-        if bond_energy_all.count(min_bond_energy_all)==1:
-            min_index=bond_energy_all.index(min_bond_energy_all)
-            out_slab=data[min_index][0]
-            self.min_bond_energy=data[min_index][2]
-            self.min_bond_energy_per_atom=data[min_index][3]
-            self.min_bond_energy_per_area=data[min_index][4]
-            self.min_dipole=data[min_index][5]
-            
-        elif bond_energy_all.count(min_bond_energy_all)>1:
-            out_data=[dd for dd in data if dd[2]==min_bond_energy_all]
-            dipoles=[np.abs(dd[-1]) for dd in out_data]
-            min_dipole=min(dipoles)
-            min_index=dipoles.index(min_dipole)
-            out_slab=out_data[min_index][0]
-            self.min_bond_energy=out_data[min_index][2]
-            self.min_bond_energy_per_atom=out_data[min_index][3]
-            self.min_bond_energy_per_area=out_data[min_index][4]
-            self.min_dipole=out_data[min_index][5]
+        min_indices=[]
+        min_bond_energy_per_atom=[]
+        min_dipoles=[]
 
-        self.re_center(slab=out_slab)
-        
-        return out_slab
+        # find those that have bond energy equal to the minimum
+        # but also differ in other quantities (indicating different
+        # terminations) and output all of them
+        for ii,xx in enumerate(bond_energy_all):
+            if not xx==min_bond_energy_all:
+                continue
+            if (not float(round(data[ii][3],4)) in min_bond_energy_per_atom) or \
+                    (not float(round(data[ii][5],4)) in min_dipoles):
+                min_indices.append(ii)
+                min_bond_energy_per_atom.append(float(round(data[ii][3],4)))
+                min_dipoles.append(float(round(data[ii][5],4)))
+
+        out_slabs=[self.re_center(slab=data[mi][0]) for mi in min_indices]
+
+        self.min_bond_energy=float(round(min_bond_energy_all,4))
+        self.min_bond_energy_per_atom=min_bond_energy_per_atom
+        self.min_bond_energy_per_area=float(round(min_bond_energy_all/2./area,4))
+        self.min_dipoles=min_dipoles
+
+        return out_slabs
     ##########
 
-    def minimize_top_bond_energy(self, slab=None, verbose=True, maxiter=10):
+    def minimize_top_bond_energy(self, slab=None, verbose=True, maxiter=25):
         """
         A function to construct terminations 
         that minimize the bond energy. 
-        The idea is to move_top2bottom a numer of 
+        The idea is to move_top2bottom a number of 
         times and then pick the slab with the minimal
         bond energy termination (top). This might be an overkill
         but insures that the global minimum is found.
@@ -1097,7 +1143,7 @@ class CutSlab():
         :param verbose: logical (to write messages or not)
                         does not work well in python.multiprocessing
 
-        :param maxiter: int (default=10)
+        :param maxiter: int (default=25)
                         hard stop after maxiter iterations
         """
         
@@ -1113,9 +1159,9 @@ class CutSlab():
                 print("Top bond energy = 0, nothing to do!")
             self.min_bond_energy=0.
             self.min_bond_energy_per_area=0.
-            self.min_bond_energy_per_atom=0.
-            self.min_dipole=self.get_dipole_moment(slab=slab)#/in_plane_area/thickness
-            return slab
+            self.min_bond_energy_per_atom=[0.]
+            self.min_dipole=[float(round(self.get_dipole_moment(slab=slab),4))]#/in_plane_area/thickness
+            return [slab]
         
         tot_top_bond_energy=np.round(np.sum(np.array(top_bond_energy)[:,1]),6)
         top_bond_energy_per_atom=np.round(tot_top_bond_energy/len(top_bond_energy),6)
@@ -1139,7 +1185,12 @@ class CutSlab():
         # Now iterate until the entire layer is shifted to the bottom
         Iter=0
 
-        while (np.abs(data[-1][1]-data[0][1])<=thickness/self.nlayers) and (Iter<maxiter):
+        if self.nlayers==1:
+            nnll=1
+        else:
+            nnll=self.nlayers-1
+
+        while (np.abs(data[-1][1]-data[0][1])<=thickness/nnll) and (Iter<maxiter):
 
             Iter=Iter+1
 
@@ -1151,7 +1202,7 @@ class CutSlab():
             zcenter=np.sum(zcoord)/len(slab)
             top_bond_energy=self.get_top_bond_energy(slab=slab)
 
-            if len(bond_energy)==0:
+            if len(top_bond_energy)==0:
                 if verbose:
                     print("Top bond energy = 0, stopping minimization!")
 
@@ -1161,7 +1212,7 @@ class CutSlab():
                 
                 data.append([slab,\
                              zcenter,\
-                             to_bond_energy,\
+                             top_bond_energy,\
                              tot_top_bond_energy,\
                              top_bond_energy_per_atom,\
                              tot_top_bond_energy/area,\
@@ -1185,34 +1236,37 @@ class CutSlab():
                 print("Iter {:2d}: bond_energy={: 10.3f},  dipole={: 10.3f}, shift={: 8.3f}".\
                       format(Iter,tot_top_bond_energy,dipole,data[-1][1]-data[-2][1]))
 
+        # Output after iterating
         bond_energy_all=[dd[3] for dd in data]
         min_bond_energy_all=min(bond_energy_all)
-        
-        if bond_energy_all.count(min_bond_energy_all)==1:
-            min_index=bond_energy_all.index(min_bond_energy_all)
-            out_slab=data[min_index][0]
-            self.min_bond_energy=data[min_index][3]
-            self.min_bond_energy_per_atom=data[min_index][4]
-            self.min_bond_energy_per_area=data[min_index][5]
-            self.min_dipole=data[min_index][6]
-            
-        elif bond_energy_all.count(min_bond_energy_all)>1:
-            out_data=[dd for dd in data if dd[3]==min_bond_energy_all]
-            biggest_energy=[max(np.array(dd[2])[:,1]) for dd in out_data]
-            min_e=min(biggest_energy)
-            min_index=biggest_energy.index(min_e)
-            out_slab=out_data[min_index][0]
-            self.min_bond_energy=out_data[min_index][3]
-            self.min_bond_energy_per_atom=out_data[min_index][4]
-            self.min_bond_energy_per_area=out_data[min_index][5]
-            self.min_dipole=out_data[min_index][6]
+  
+        min_indices=[]
+        min_bond_energy_per_atom=[]
+        min_dipoles=[]
 
-        self.re_center(slab=out_slab)
-        
-        return out_slab
+        # find those that have bond energy equal to the minimum
+        # but also differ in other quantities (indicating different
+        # terminations) and output all of them
+        for ii,xx in enumerate(bond_energy_all):
+            if not xx==min_bond_energy_all:
+                continue
+            if (not float(round(data[ii][4],4)) in min_bond_energy_per_atom) or \
+                    (not float(round(data[ii][6],4)) in min_dipoles):
+                min_indices.append(ii)
+                min_bond_energy_per_atom.append(float(round(data[ii][4],4)))
+                min_dipoles.append(float(round(data[ii][6],4)))
+
+        out_slabs=[self.re_center(slab=data[mi][0]) for mi in min_indices]
+
+        self.min_bond_energy=float(round(min_bond_energy_all,4))
+        self.min_bond_energy_per_atom=min_bond_energy_per_atom
+        self.min_bond_energy_per_area=float(np.round(min_bond_energy_all/area,4))
+        self.min_dipoles=min_dipoles
+
+        return out_slabs
     ##########
 
-    def minimize_madelung_energy(self, slab=None, verbose=True, maxiter=10):
+    def minimize_madelung_energy(self, slab=None, verbose=True, maxiter=25):
 
         """
         A function to construct terminations 
@@ -1232,7 +1286,7 @@ class CutSlab():
         :param verbose: logical (to write messages or not)
                         does not work well in python.multiprocessing
 
-        :param maxiter: int (default=10)
+        :param maxiter: int (default=25)
                         hard stop after maxiter iterations
         """
         
@@ -1257,13 +1311,19 @@ class CutSlab():
         # Now iterate until the entire layer is shifted to the bottom
         Iter=0
 
-        while (np.abs(data[-1][1]-data[0][1])<=thickness/self.nlayers) and (Iter<maxiter):
+        if self.nlayers==1:
+            nnll=1
+        else:
+            nnll=self.nlayers-1
+
+        while (np.abs(data[-1][1]-data[0][1])<=thickness/nnll) and (Iter<maxiter):
 
             Iter=Iter+1
 
             # Move the top undercoordinated to the bottom
-            slab=self.move_top2bottom_energy(slab=slab)
-
+            #vladan slab=self.move_top2bottom_energy(slab=slab)
+            slab=self.move_top2bottom(slab=slab)
+            
             # Get the relevant info
             zcoord=[atom.pos[2] for atom in slab]
             zcenter=np.sum(zcoord)/len(slab)
@@ -1277,27 +1337,21 @@ class CutSlab():
                 print("Iter {:2d}: madelung_energy={: 10.3f},  dipole={: 10.3f}, shift={: 8.3f}".\
                       format(Iter,madelung_energy,dipole,data[-1][1]-data[-2][1]))
 
+        # Output after iterating
         madelung_energy_all=[dd[2] for dd in data]
-        min_madelung_energy_all=min(madelung_energy_all)
-        
-        if madelung_energy_all.count(min_madelung_energy_all)==1:
-            min_index=madelung_energy_all.index(min_madelung_energy_all)
-            out_slab=data[min_index][0]
-            self.min_madelung_energy=data[min_index][2]
-            self.min_madelung_energy_area=data[min_index][3]
-            self.min_dipole=data[min_index][4]
-            
-        elif madelung_energy_all.count(min_madelung_energy_all)>1:
-            out_data=[dd for dd in data if dd[2]==min_madelung_energy_all]
-            dipoles=[np.abs(dd[-1]) for dd in out_data]
-            min_dipole=min(dipoles)
-            min_index=dipoles.index(min_dipole)
-            out_slab=out_data[min_index][0]
-            self.min_madelung_energy=out_data[min_index][2]
-            self.min_madelung_energy_area=out_data[min_index][3]            
-            self.min_dipole=out_data[min_index][4]
+        min_madelung_energy_all=round(min(madelung_energy_all),4)
 
-        self.re_center(slab=out_slab)
+        min_indices=[ii for ii,xx in enumerate(madelung_energy_all) if round(xx,4)==min_madelung_energy_all]
+
+        # Seems that all slabs with the same Madelung en. and same dipole moment
+        # are terminated the same way. Hence, outputing only one rather
+        # than a bunch (lowest madelung).
+        #out_slabs=[self.re_center(slab=data[mi][0]) for mi in min_indices]
+        out_slabs=[self.re_center(slab=data[mi][0]) for mi in min_indices][0]
+
+        self.min_madelung_energy=min_madelung_energy_all
+        self.min_madelung_energy_area=round(min_madelung_energy_all/2./area,4)
+        self.min_dipoles=[float(round(data[mi][4],4)) for mi in min_indices]
         
-        return out_slab
+        return out_slabs
     ##########
